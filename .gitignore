@@ -1,0 +1,5 @@
+processed/
+reports/
+raw_frames/
+*.mp4
+*.log

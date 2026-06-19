@@ -1,3 +1,5 @@
+. "$PSScriptRoot\validation.ps1"
+
 function Test-FFmpeg {
     <#
     .SYNOPSIS
@@ -94,5 +96,151 @@ function Get-FFmpegVersion {
     } catch {
         # In case of any exception (e.g., ffmpeg not found, access denied), return null
         return $null
+    }
+}
+
+function Render-FrameSequence {
+    <#
+    .SYNOPSIS
+        Renders a frame sequence into a video file using FFmpeg.
+    .DESCRIPTION
+        Takes a validated frame sequence and renders it to a video file using FFmpeg with standardized encoding settings.
+        Relies on Test-FrameSequence for input validation and Test-FFmpeg for FFmpeg availability verification.
+    .PARAMETER FrameDirectory
+        Path to directory containing frame files.
+    .PARAMETER FPS
+        Frames per second for input sequence.
+    .PARAMETER OutputVideoPath
+        Full path for output video file.
+    .OUTPUTS
+        PSCustomObject with properties:
+            Success (bool): True if rendering completed successfully
+            VideoPath (string): OutputVideoPath on success, $null on failure
+            ErrorMessage (string): Error details on failure, $null on success
+            Duration (double): (frame count) / FPS on success, 0 on failure
+    .EXAMPLE
+        $result = Render-FrameSequence -FrameDirectory ".\frames" -FPS 30 -OutputVideoPath ".\output.mp4"
+        if ($result.Success) {
+            Write-Host "Rendered video to $($result.VideoPath) with duration $($result.Duration)s"
+        } else {
+            Write-Warning "Render failed: $($result.ErrorMessage)"
+        }
+    #>
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$FrameDirectory,
+
+        [Parameter(Mandatory=$true)]
+        [int]$FPS,
+
+        [Parameter(Mandatory=$true)]
+        [string]$OutputVideoPath
+    )
+
+    # Validate FPS
+    if ($FPS -le 0) {
+        return [PSCustomObject]@{
+            Success      = $false
+            VideoPath    = $null
+            ErrorMessage = "FPS must be greater than zero"
+            Duration     = 0
+        }
+    }
+
+    # Validate output path directory exists
+    $outputDir = Split-Path -Path $OutputVideoPath -Parent
+    if (-not (Test-Path -Path $outputDir -PathType Container)) {
+        return [PSCustomObject]@{
+            Success      = $false
+            VideoPath    = $null
+            ErrorMessage = "Output directory does not exist: $outputDir"
+            Duration     = 0
+        }
+    }
+
+    # Validate frame sequence using Test-FrameSequence
+    $validationResult = Test-FrameSequence -Directory $FrameDirectory
+    if (-not $validationResult.Valid) {
+        return [PSCustomObject]@{
+            Success      = $false
+            VideoPath    = $null
+            ErrorMessage = $validationResult.Error
+            Duration     = 0
+        }
+    }
+
+    # Verify FFmpeg availability
+    $ffmpegResult = Test-FFmpeg
+    if (-not $ffmpegResult.Installed) {
+        return [PSCustomObject]@{
+            Success      = $false
+            VideoPath    = $null
+            ErrorMessage = $ffmpegResult.Error
+            Duration     = 0
+        }
+    }
+
+    # Extract information from validated sequence
+    $extension = $validationResult.Extension
+    $frameCount = [double]$validationResult.TotalFrames  # When Valid=$true, TotalFrames = frame count
+
+    # Calculate duration
+    $duration = $frameCount / $FPS
+
+    # Construct FFmpeg command with hardcoded project-standard settings
+    $inputPattern = Join-Path -Path $FrameDirectory -ChildPath "frame_%04d.$extension"
+
+    # Fixed video filter (scale to 1080x1920 maintaining aspect ratio with padding)
+    $videoFilter = "scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2"
+
+    # Fixed encoding settings (approved)
+    $videoCodec = "libx264"
+    $crfValue = "18"
+    $presetValue = "medium"
+    $pixelFormat = "yuv420p"
+
+    # Build FFmpeg argument array (raw values, no extra quotes)
+    $ffmpegArguments = @(
+        "-framerate", $FPS,
+        "-start_number", "1",
+        "-i", $inputPattern,
+        "-vf", $videoFilter,
+        "-c:v", $videoCodec,
+        "-crf", $crfValue,
+        "-preset", $presetValue,
+        "-pix_fmt", $pixelFormat,
+        "-t", $duration,
+        $OutputVideoPath
+    )
+
+    # Execute FFmpeg
+    try {
+        & ffmpeg @ffmpegArguments 2>&1
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -eq 0) {
+            return [PSCustomObject]@{
+                Success      = $true
+                VideoPath    = $OutputVideoPath
+                ErrorMessage = $null
+                Duration     = $duration
+            }
+        } else {
+            return [PSCustomObject]@{
+                Success      = $false
+                VideoPath    = $null
+                ErrorMessage = "FFmpeg execution failed with exit code $exitCode"
+                Duration     = 0
+            }
+        }
+    } catch {
+        return [PSCustomObject]@{
+            Success      = $false
+            VideoPath    = $null
+            ErrorMessage = "Failed to execute FFmpeg: $($_.Exception.Message)"
+            Duration     = 0
+        }
     }
 }

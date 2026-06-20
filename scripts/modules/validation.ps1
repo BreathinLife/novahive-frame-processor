@@ -96,7 +96,7 @@ function Test-FrameSequence {
 
     # Extract frame numbers and extensions
     $frameNumbers = $validFrames.FrameNumber
-    $extensions = $validFrames.Extension | Select-Object -Unique
+    $extensions = @($validFrames.Extension | Select-Object -Unique)
 
     # Calculate TotalFrames (highest frame number found)
     $maxFrame = ($frameNumbers | Measure-Object -Maximum).Maximum
@@ -114,6 +114,7 @@ function Test-FrameSequence {
     # Determine Extension (common extension if all files have same extension)
     if ($extensions.Count -eq 1) {
         $result.Extension = $extensions[0]
+        
     } else {
         $result.Extension = ""  # No common extension when multiple extensions present
     }
@@ -215,7 +216,7 @@ function Get-FrameStatistics {
 
     # Extract frame numbers and extensions
     $frameNumbers = $validFrames.FrameNumber
-    $extensions = $validFrames.Extension | Select-Object -Unique
+    $extensions = @($validFrames.Extension | Select-Object -Unique)
 
     # Calculate TotalFrames (count of valid files)
     $result.TotalFrames = $validFrames.Count
